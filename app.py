@@ -5,11 +5,11 @@ import streamlit as st
 import docx
 import fitz  # PyMuPDF
 from pptx import Presentation
-from pptx.util import Inches, Pt
+from pptx.util import Pt
 import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
-API_KEY = st.secrets["GEMINI_API_KEY"]  # Put GEMINI_API_KEY in Streamlit Secrets
+API_KEY = st.secrets.get("GEMINI_API_KEY")  # ✅ read safely
 MODEL_NAME = "gemini-2.0-flash"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(MODEL_NAME)
@@ -35,8 +35,8 @@ def generate_outline_from_desc(description: str, num_items: int, mode: str = "pp
 Generate exactly {num_items} content slides (excluding title slide).
 Format strictly like this:
 Slide 1: <Title>
-- Bullet
-- Sub-bullet
+• Main point
+- Sub-point
 """
     else:
         prompt = f"""Create a detailed Document outline on: {description}.
@@ -66,10 +66,10 @@ def parse_points(points_text: str):
                 points.append({"title": current_title, "description": "\n\n".join(current_content)})
             current_title, current_content = m.group(3).strip(), []
             continue
-        if line.startswith("-"):
-            current_content.append("• " + line.lstrip("-").strip())  # Main bullet with dot
-        elif line.startswith("•"):
-            current_content.append("- " + line.lstrip("•").strip())  # Sub-bullet with dash
+        if line.startswith("•"):
+            current_content.append("• " + line.lstrip("•").strip())  # keep main bullet
+        elif line.startswith("-"):
+            current_content.append("- " + line.lstrip("-").strip())  # sub-point with dash
         else:
             current_content.append(line.strip())
 
@@ -94,7 +94,7 @@ def summarize_long_text(full_text: str) -> str:
     return call_gemini(f"Summarize this text clearly:\n\n{full_text}")
 
 def generate_title(summary: str) -> str:
-    return call_gemini(f"Generate a short, presentation-style title from this:\n\n{summary}")
+    return call_gemini(f"Generate a short, clear, presentation-style title from this:\n\n{summary}")
 
 # ---------------- FILE GENERATORS ----------------
 def create_ppt(title, slides, filename="output.pptx"):
@@ -117,11 +117,11 @@ def create_ppt(title, slides, filename="output.pptx"):
         for line in slide_data["description"].split("\n"):
             if not line.strip():
                 continue
-            if line.strip().startswith("-"):
+            if line.strip().startswith("-"):  # sub-point
                 p = text_frame.add_paragraph()
                 p.text = line.strip()
                 p.level = 1
-            else:
+            else:  # main point
                 p = text_frame.add_paragraph()
                 p.text = line.strip()
                 p.level = 0
