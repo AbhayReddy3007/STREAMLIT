@@ -1,15 +1,15 @@
 import copy
 import re
+import json
 import datetime
 import streamlit as st
 import docx
 import fitz  # PyMuPDF
 from pptx import Presentation
-from pptx.util import Pt
 import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
-API_KEY = "AIzaSyASAUFBojVTrN6wFN2JormPrL2sZWQZGWA"  # 🔑 Hardcode your Gemini API key
+API_KEY = "AIzaSyASAUFBojVTrN6wFN2JormPrL2sZWQZGWA"  # <-- replace with your Gemini API key
 MODEL_NAME = "gemini-2.0-flash"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(MODEL_NAME)
@@ -18,9 +18,23 @@ st.set_page_config(page_title="AI Productivity Suite", layout="wide")
 st.title("📑📄 PPT & DOC Generator + Chat with Document")
 
 # ---------------- HELPERS ----------------
-def call_gemini(prompt: str) -> str:
-    resp = model.generate_content(prompt)
-    return resp.text.strip()
+def call_gemini_json(prompt: str) -> dict:
+    """Force Gemini to return valid JSON."""
+    json_prompt = f"""
+You are an AI assistant. Respond ONLY with valid JSON. 
+Do NOT include explanations, markdown, or text outside JSON.
+
+{prompt}
+"""
+    resp = model.generate_content(json_prompt)
+    text = resp.text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # try to clean response
+        cleaned = re.sub(r"```json|```", "", text).strip()
+        return json.loads(cleaned)
 
 def extract_slide_count(description: str, default: int = 5) -> int:
     m = re.search(r"(\d+)\s*(slides?|sections?|pages?)", description, re.IGNORECASE)
@@ -31,51 +45,40 @@ def extract_slide_count(description: str, default: int = 5) -> int:
 
 def generate_outline_from_desc(description: str, num_items: int, mode: str = "ppt"):
     if mode == "ppt":
-        prompt = f"""Create a PowerPoint outline on: {description}.
-Generate exactly {num_items} content slides (excluding title slide).
-Format strictly like this:
-Slide 1: <Title>
-• Main point
-- Sub-point
+        prompt = f"""
+Generate a JSON PPT outline with this structure:
+{{
+  "title": "Presentation Title",
+  "slides": [
+    {{"title": "Slide Title", "description": "• Main point\\n- Subpoint"}}
+  ]
+}}
+
+Rules:
+- Title is 1 line
+- Exactly {num_items} slides (excluding title slide)
+- Use "• " for bullets, "- " for subpoints
+
+Topic: {description}
 """
     else:
-        prompt = f"""Create a detailed Document outline on: {description}.
-Generate exactly {num_items} sections (treat each section as roughly one page).
-Each section should have:
-- A section title
-- 2–3 descriptive paragraphs (5–7 sentences each) of full prose, not bullets.
-Format strictly like this:
-Section 1: <Title>
-<Paragraph 1>
-<Paragraph 2>
+        prompt = f"""
+Generate a JSON Document outline with this structure:
+{{
+  "title": "Document Title",
+  "sections": [
+    {{"title": "Section Title", "description": "Paragraph 1\\n\\nParagraph 2"}}
+  ]
+}}
+
+Rules:
+- Title is 1 line
+- Exactly {num_items} sections
+- Each section has 2–3 full paragraphs
+
+Topic: {description}
 """
-    points_text = call_gemini(prompt)
-    return parse_points(points_text)
-
-def parse_points(points_text: str):
-    points = []
-    current_title, current_content = None, []
-    lines = [re.sub(r"[#*>`]", "", ln).strip() for ln in points_text.splitlines()]
-
-    for line in lines:
-        if not line:
-            continue
-        m = re.match(r"^\s*(Slide|Section)\s*(\d+)\s*:\s*(.+)$", line, re.IGNORECASE)
-        if m:
-            if current_title:
-                points.append({"title": current_title, "description": "\n\n".join(current_content)})
-            current_title, current_content = m.group(3).strip(), []
-            continue
-        if line.startswith("•"):
-            current_content.append("• " + line.lstrip("•").strip())  # main bullet
-        elif line.startswith("-"):
-            current_content.append("- " + line.lstrip("-").strip())  # sub-point
-        else:
-            current_content.append(line.strip())
-
-    if current_title:
-        points.append({"title": current_title, "description": "\n\n".join(current_content)})
-    return points
+    return call_gemini_json(prompt)
 
 def extract_text(uploaded_file) -> str:
     name = uploaded_file.name.lower()
@@ -91,19 +94,12 @@ def extract_text(uploaded_file) -> str:
     return ""
 
 def summarize_long_text(full_text: str) -> str:
-    return call_gemini(f"Summarize this text clearly:\n\n{full_text}")
+    return model.generate_content(f"Summarize this text clearly:\n\n{full_text}").text.strip()
 
 def generate_title(summary: str) -> str:
-    prompt = f"""
-    Read the following summary and generate ONE short, clear, presentation-style title.
-    - Keep it under 12 words
-    - Do not give multiple options
-    - Return ONLY the title, nothing else.
-
-    Summary:
-    {summary}
-    """
-    return call_gemini(prompt).strip()
+    return model.generate_content(
+        f"Generate only one short, clear, presentation-style title from this:\n\n{summary}"
+    ).text.strip()
 
 # ---------------- FILE GENERATORS ----------------
 def create_ppt(title, slides, filename="output.pptx"):
@@ -126,7 +122,7 @@ def create_ppt(title, slides, filename="output.pptx"):
         for line in slide_data["description"].split("\n"):
             if not line.strip():
                 continue
-            if line.strip().startswith("-"):  # sub-point
+            if line.strip().startswith("-"):  # subpoint
                 p = text_frame.add_paragraph()
                 p.text = line.strip()
                 p.level = 1
@@ -172,16 +168,16 @@ if prompt := st.chat_input("Type a message, ask for a PPT or a Document..."):
     try:
         if "ppt" in text or "presentation" in text or "slides" in text:
             outline = generate_outline_from_desc(prompt, extract_slide_count(prompt), mode="ppt")
-            st.session_state.outline = {"title": generate_title(prompt), "slides": outline}
+            st.session_state.outline = outline
             st.session_state.outline_mode = "ppt"
             st.session_state.messages.append(("assistant", "✅ Generated PPT outline! Preview below."))
         elif "doc" in text or "document" in text or "report" in text or "pages" in text:
             outline = generate_outline_from_desc(prompt, extract_slide_count(prompt), mode="doc")
-            st.session_state.outline = {"title": generate_title(prompt), "sections": outline}
+            st.session_state.outline = outline
             st.session_state.outline_mode = "doc"
             st.session_state.messages.append(("assistant", "✅ Generated Document outline! Preview below."))
         else:
-            bot_reply = call_gemini(prompt)
+            bot_reply = model.generate_content(prompt).text.strip()
             st.session_state.messages.append(("assistant", bot_reply))
     except Exception as e:
         st.session_state.messages.append(("assistant", f"⚠️ Error: {e}"))
@@ -203,12 +199,9 @@ if st.session_state.outline:
     with col1:
         feedback = st.text_area("✏️ Feedback for outline", key=f"feedback_{mode}")
         if st.button("🔄 Apply Feedback"):
-            prompt = f"Update this {mode.upper()} outline with feedback:\n\n{outline}\n\nFeedback: {feedback}"
-            updated_points = parse_points(call_gemini(prompt))
-            if mode == "ppt":
-                st.session_state.outline = {"title": new_title, "slides": updated_points}
-            else:
-                st.session_state.outline = {"title": new_title, "sections": updated_points}
+            prompt = f"Update this {mode.upper()} outline with feedback. Return only JSON.\n\nOutline:\n{json.dumps(outline)}\n\nFeedback: {feedback}"
+            updated_outline = call_gemini_json(prompt)
+            st.session_state.outline = updated_outline
             st.rerun()
 
     with col2:
@@ -232,7 +225,7 @@ if uploaded_file:
         text = extract_text(uploaded_file)
         summary = summarize_long_text(text)
         st.session_state.summary_text = summary
-        st.session_state.summary_title = generate_title(summary)  # ✅ one clean title
+        st.session_state.summary_title = generate_title(summary)
     st.success(f"✅ Document processed! Title: **{st.session_state.summary_title}**")
 
     st.markdown("💬 **Chat with your document**")
@@ -242,9 +235,8 @@ if uploaded_file:
 
     if doc_prompt := st.chat_input("Ask a question about the uploaded document..."):
         st.session_state.doc_chat_history.append(("user", doc_prompt))
-        answer = call_gemini(
+        answer = model.generate_content(
             f"Answer based only on this document:\n\n{st.session_state.summary_text}\n\nQ: {doc_prompt}"
-        )
+        ).text.strip()
         st.session_state.doc_chat_history.append(("assistant", answer))
         st.rerun()
-
