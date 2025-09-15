@@ -15,7 +15,7 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(MODEL_NAME)
 
 st.set_page_config(page_title="AI Productivity Suite", layout="wide")
-st.title("📑📄 PPT & DOC Generator + Chat with Document")
+st.title("Chatbot")
 
 # ---------------- HELPERS ----------------
 def call_gemini_json(prompt: str) -> dict:
@@ -240,3 +240,4 @@ if uploaded_file:
         ).text.strip()
         st.session_state.doc_chat_history.append(("assistant", answer))
         st.rerun()
+
