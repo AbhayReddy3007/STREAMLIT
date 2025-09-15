@@ -9,7 +9,7 @@ from pptx.util import Pt
 import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
-API_KEY = "AIzaSyASAUFBojVTrN6wFN2JormPrL2sZWQZGWA"
+API_KEY = "YOUR_API_KEY_HERE"  # 🔑 Hardcode your Gemini API key
 MODEL_NAME = "gemini-2.0-flash"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(MODEL_NAME)
@@ -67,9 +67,9 @@ def parse_points(points_text: str):
             current_title, current_content = m.group(3).strip(), []
             continue
         if line.startswith("•"):
-            current_content.append("• " + line.lstrip("•").strip())  # keep main bullet
+            current_content.append("• " + line.lstrip("•").strip())  # main bullet
         elif line.startswith("-"):
-            current_content.append("- " + line.lstrip("-").strip())  # sub-point with dash
+            current_content.append("- " + line.lstrip("-").strip())  # sub-point
         else:
             current_content.append(line.strip())
 
@@ -94,7 +94,16 @@ def summarize_long_text(full_text: str) -> str:
     return call_gemini(f"Summarize this text clearly:\n\n{full_text}")
 
 def generate_title(summary: str) -> str:
-    return call_gemini(f"Generate a short, clear, presentation-style title from this:\n\n{summary}")
+    prompt = f"""
+    Read the following summary and generate ONE short, clear, presentation-style title.
+    - Keep it under 12 words
+    - Do not give multiple options
+    - Return ONLY the title, nothing else.
+
+    Summary:
+    {summary}
+    """
+    return call_gemini(prompt).strip()
 
 # ---------------- FILE GENERATORS ----------------
 def create_ppt(title, slides, filename="output.pptx"):
@@ -223,8 +232,8 @@ if uploaded_file:
         text = extract_text(uploaded_file)
         summary = summarize_long_text(text)
         st.session_state.summary_text = summary
-        st.session_state.summary_title = generate_title(summary)
-    st.success(f"✅ Document processed! Suggested Title: **{st.session_state.summary_title}**")
+        st.session_state.summary_title = generate_title(summary)  # ✅ one clean title
+    st.success(f"✅ Document processed! Title: **{st.session_state.summary_title}**")
 
     st.markdown("💬 **Chat with your document**")
     for role, content in st.session_state.doc_chat_history:
@@ -233,7 +242,8 @@ if uploaded_file:
 
     if doc_prompt := st.chat_input("Ask a question about the uploaded document..."):
         st.session_state.doc_chat_history.append(("user", doc_prompt))
-        answer = call_gemini(f"Answer based only on this document:\n\n{st.session_state.summary_text}\n\nQ: {doc_prompt}")
+        answer = call_gemini(
+            f"Answer based only on this document:\n\n{st.session_state.summary_text}\n\nQ: {doc_prompt}"
+        )
         st.session_state.doc_chat_history.append(("assistant", answer))
         st.rerun()
-
