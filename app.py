@@ -9,7 +9,7 @@ from pptx.util import Pt
 import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
-API_KEY = "YOUR_API_KEY_HERE"  # 🔑 Hardcode your Gemini API key
+API_KEY = "AIzaSyASAUFBojVTrN6wFN2JormPrL2sZWQZGWA"  # 🔑 Hardcode your Gemini API key
 MODEL_NAME = "gemini-2.0-flash"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(MODEL_NAME)
@@ -247,3 +247,4 @@ if uploaded_file:
         )
         st.session_state.doc_chat_history.append(("assistant", answer))
         st.rerun()
+
